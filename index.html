@@ -423,7 +423,7 @@ Respond ONLY with a valid JSON object in this exact format, no markdown, no extr
   "description": "A 4-5 sentence humorous description of the creature blending all four body parts naturally without labelling them separately. Make it funny and irreverent."
 }`;
 
-    const response = await fetch("/api/generate", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -507,28 +507,163 @@ async function doExport() {
     const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
     const page = pdfDoc.getPages()[0];
     const { width, height } = page.getSize();
+    // height = 842.25, width = 595.5
+    // PDF y=0 is BOTTOM. Form top coords convert as: pdfY = height - formTop
 
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const fontReg  = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-    // White out FATE logo + Refresh box (top-right area)
-    // Form coords: top-right from about x=335, top=45 to top=200
-    // PDF y = height - formTop
+    // ── White out FATE logo + Refresh box (top-right) ──────────────────────
+    // Form coords: x=333 to 568, top=45 to 200
     page.drawRectangle({
       x: 333, y: height - 205,
-      width: 235, height: 165,
-      color: rgb(1, 1, 1),
-      borderWidth: 0,
+      width: 237, height: 168,
+      color: rgb(1, 1, 1), borderWidth: 0,
     });
 
-    // Embed image
-    if (currentMutant.imageUrl && mutantImg.complete && mutantImg.naturalWidth > 0) {
+    // ── White out left column: Description area down through ASPECTS ────────
+    // We want to clear the area from below Name (top~95) to below Other Aspect (top~470)
+    // so we can redraw everything shifted down
+    page.drawRectangle({
+      x: 44, y: height - 660,
+      width: 290, height: 560,
+      color: rgb(1, 1, 1), borderWidth: 0,
+    });
+
+    // ── Redraw Description label ─────────────────────────────────────────────
+    page.drawText('Description', {
+      x: 64, y: height - 140,
+      size: 7, font: fontReg, color: rgb(0.5, 0.5, 0.5),
+    });
+
+    // ── Draw Description box border ──────────────────────────────────────────
+    // Description box: from top=133 down to top=300 (167pt tall)
+    page.drawRectangle({
+      x: 47, y: height - 305,
+      width: 278, height: 168,
+      borderColor: rgb(0, 0, 0), borderWidth: 0.75,
+      color: rgb(1,1,1,0),
+    });
+
+    // ── Redraw ASPECTS header (shifted down 80pt: 220+80=300) ────────────────
+    page.drawRectangle({
+      x: 47, y: height - 318,
+      width: 278, height: 17,
+      color: rgb(0, 0, 0),
+    });
+    page.drawText('ASPECTS', {
+      x: 95, y: height - 314,
+      size: 10, font: fontBold, color: rgb(1, 1, 1),
+    });
+
+    // ── Redraw aspect field boxes (each ~45pt tall, shifted down 80pt) ───────
+    const aspectFields = [
+      { label: 'High Aspect', formTop: 245+80 },
+      { label: 'Trouble',     formTop: 291+80 },
+      { label: 'Relationship',formTop: 336+80 },
+      { label: 'Other Aspect',formTop: 381+80 },
+      { label: 'Other Aspect',formTop: 426+80 },
+    ];
+    for (const f of aspectFields) {
+      const boxTop = f.formTop + 7;
+      const boxH = 38;
+      page.drawText(f.label, {
+        x: 64, y: height - f.formTop - 5,
+        size: 7, font: fontReg, color: rgb(0.5, 0.5, 0.5),
+      });
+      page.drawRectangle({
+        x: 47, y: height - boxTop - boxH,
+        width: 278, height: boxH,
+        borderColor: rgb(0, 0, 0), borderWidth: 0.75,
+        color: rgb(1,1,1,0),
+      });
+    }
+
+    // ── Redraw CONSEQUENCES header (shifted 80pt: 486+80=566) ────────────────
+    page.drawRectangle({
+      x: 47, y: height - 584,
+      width: 278, height: 17,
+      color: rgb(0, 0, 0),
+    });
+    page.drawText('CONSEQUENCES', {
+      x: 68, y: height - 580,
+      size: 10, font: fontBold, color: rgb(1, 1, 1),
+    });
+
+    // ── Consequence boxes (shifted 80pt) ─────────────────────────────────────
+    const conseqs = [
+      { label: 'Consequence 2', num: '2', formTop: 511+80 },
+      { label: 'Consequence 4', num: '4', formTop: 556+80 },
+      { label: 'Consequence 6', num: '6', formTop: 601+80 },
+    ];
+    for (const c of conseqs) {
+      const boxTop = c.formTop + 7;
+      page.drawText(c.label, {
+        x: 64, y: height - c.formTop - 5,
+        size: 7, font: fontReg, color: rgb(0.5, 0.5, 0.5),
+      });
+      page.drawRectangle({
+        x: 47, y: height - boxTop - 38,
+        width: 258, height: 38,
+        borderColor: rgb(0, 0, 0), borderWidth: 0.75,
+        color: rgb(1,1,1,0),
+      });
+      // Number badge
+      page.drawRectangle({
+        x: 305, y: height - boxTop - 38,
+        width: 20, height: 38,
+        borderColor: rgb(0, 0, 0), borderWidth: 0.75,
+        color: rgb(1,1,1,0),
+      });
+      page.drawText(c.num, {
+        x: 312, y: height - boxTop - 24,
+        size: 14, font: fontBold, color: rgb(0.7, 0.7, 0.7),
+      });
+    }
+
+    // ── STRESS header (shifted 80pt: 661+80=741) ─────────────────────────────
+    // But page height is 842, so 741 from top = pdfY 101. Getting tight.
+    // Shrink stress boxes to 18pt tall instead of 25pt
+    page.drawRectangle({
+      x: 47, y: height - 759,
+      width: 278, height: 17,
+      color: rgb(0, 0, 0),
+    });
+    page.drawText('STRESS', {
+      x: 95, y: height - 755,
+      size: 10, font: fontBold, color: rgb(1, 1, 1),
+    });
+
+    // Stress boxes - small, side by side
+    const stressNums = ['1','2','3'];
+    const stressStartX = 60;
+    const stressBoxW = 55;
+    const stressBoxH = 30;
+    const stressY = height - 800;
+    for (let i = 0; i < 3; i++) {
+      const bx = stressStartX + i * (stressBoxW + 20);
+      page.drawRectangle({
+        x: bx, y: stressY,
+        width: stressBoxW, height: stressBoxH,
+        borderColor: rgb(0, 0, 0), borderWidth: 1,
+        color: rgb(1,1,1,0),
+      });
+      page.drawText(stressNums[i], {
+        x: bx + stressBoxW/2 - 5, y: stressY + 8,
+        size: 14, font: fontBold, color: rgb(0.75, 0.75, 0.75),
+      });
+    }
+
+    // ── Image in top-right ────────────────────────────────────────────────────
+    if (currentMutant.imageUrl) {
       try {
-        const resp = await fetch(currentMutant.imageUrl);
-        const buf  = await resp.arrayBuffer();
+        // Use a CORS proxy to fetch the image
+        const proxyUrl = '/api/image-proxy?url=' + encodeURIComponent(currentMutant.imageUrl);
+        const resp = await fetch(proxyUrl);
+        if (!resp.ok) throw new Error('proxy failed');
+        const buf = await resp.arrayBuffer();
         const bytes = new Uint8Array(buf);
 
-        // Detect PNG vs JPEG
         let embImg;
         if (bytes[0] === 0x89 && bytes[1] === 0x50) {
           embImg = await pdfDoc.embedPng(bytes);
@@ -541,7 +676,12 @@ async function doExport() {
           width: 229, height: 159,
         });
       } catch(imgErr) {
-        console.warn('Image embed skipped:', imgErr);
+        console.warn('Image embed failed:', imgErr.message);
+        // Draw placeholder
+        page.drawText('[Image unavailable]', {
+          x: 380, y: height - 130,
+          size: 9, font: fontReg, color: rgb(0.6, 0.6, 0.6),
+        });
       }
     }
 
@@ -549,27 +689,23 @@ async function doExport() {
     page.drawRectangle({
       x: 333, y: height - 205,
       width: 235, height: 165,
-      borderColor: rgb(0,0,0),
-      borderWidth: 0.75,
+      borderColor: rgb(0, 0, 0), borderWidth: 0.75,
       color: rgb(1,1,1,0),
     });
 
-    // Name — form top ~82, x ~64
-    const nameText = currentMutant.name;
-    page.drawText(nameText.substring(0, 55), {
+    // ── Name ──────────────────────────────────────────────────────────────────
+    page.drawText(currentMutant.name.substring(0, 55), {
       x: 66, y: height - 100,
-      size: 10, font: fontBold,
-      color: rgb(0,0,0),
+      size: 10, font: fontBold, color: rgb(0, 0, 0),
     });
 
-    // Description — form top ~133, x ~64
-    const descLines = wrapText(currentMutant.description, 9, 246);
-    let dy = height - 148;
-    for (const line of descLines.slice(0, 8)) {
+    // ── Description ───────────────────────────────────────────────────────────
+    const descLines = wrapText(currentMutant.description, 8.5, 262);
+    let dy = height - 152;
+    for (const line of descLines.slice(0, 14)) {
       page.drawText(line, {
-        x: 66, y: dy,
-        size: 8.5, font: fontReg,
-        color: rgb(0,0,0),
+        x: 55, y: dy,
+        size: 8.5, font: fontReg, color: rgb(0, 0, 0),
       });
       dy -= 11;
     }
@@ -590,7 +726,6 @@ async function doExport() {
     btnExport.textContent = '📄 Export PDF';
   }
 }
-
 function wrapText(text, fontSize, maxWidth) {
   const charW = fontSize * 0.48;
   const maxChars = Math.floor(maxWidth / charW);
